@@ -6,7 +6,7 @@ MetaData type.
 
 The specification implemented: https://github.com/toml-lang/toml
 
-The sub-command github.com/BurntSushi/toml/cmd/tomlv can be used to verify
+The sub-command github.com/aarzilli/tomlb/cmd/tomlv can be used to verify
 whether a file is a valid TOML document. It can also be used to print the
 type of each key in a TOML document.
 
