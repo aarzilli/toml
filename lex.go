@@ -29,7 +29,7 @@ const (
 	itemArrayTableStart
 	itemArrayTableEnd
 	itemKeyStart
-	itemCommentStart
+	itemComment
 	itemInlineTableStart
 	itemInlineTableEnd
 )
@@ -859,7 +859,6 @@ func lexBool(lx *lexer) stateFn {
 // itemCommentStart and consume no characters, passing control to lexComment.
 func lexCommentStart(lx *lexer) stateFn {
 	lx.ignore()
-	lx.emit(itemCommentStart)
 	return lexComment
 }
 
@@ -869,7 +868,7 @@ func lexCommentStart(lx *lexer) stateFn {
 func lexComment(lx *lexer) stateFn {
 	r := lx.peek()
 	if isNL(r) || r == eof {
-		lx.emit(itemText)
+		lx.emit(itemComment)
 		return lx.pop()
 	}
 	lx.next()
@@ -942,7 +941,7 @@ func (itype itemType) String() string {
 		return "Array"
 	case itemArrayEnd:
 		return "ArrayEnd"
-	case itemCommentStart:
+	case itemComment:
 		return "CommentStart"
 	}
 	panic(fmt.Sprintf("BUG: Unknown type '%d'.", int(itype)))

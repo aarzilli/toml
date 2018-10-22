@@ -71,12 +71,20 @@ func (p *parser) panicf(format string, v ...interface{}) {
 	panic(parseError(msg))
 }
 
+// returns the next non-comment item
 func (p *parser) next() item {
-	it := p.lx.nextItem()
-	if it.typ == itemError {
-		p.panicf("%s", it.val)
+	for {
+		it := p.lx.nextItem()
+		switch it.typ {
+		case itemError:
+			p.panicf("%s", it.val)
+		case itemComment:
+			// skip
+		default:
+			return it
+		}
 	}
-	return it
+		
 }
 
 func (p *parser) bug(format string, v ...interface{}) {
@@ -97,9 +105,6 @@ func (p *parser) assertEqual(expected, got itemType) {
 
 func (p *parser) topLevel(item item) {
 	switch item.typ {
-	case itemCommentStart:
-		p.approxLine = item.line
-		p.expect(itemText)
 	case itemTableStart:
 		kg := p.next()
 		p.approxLine = kg.line
@@ -259,11 +264,6 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 		types := make([]tomlType, 0)
 
 		for it = p.next(); it.typ != itemArrayEnd; it = p.next() {
-			if it.typ == itemCommentStart {
-				p.expect(itemText)
-				continue
-			}
-
 			val, typ := p.value(it)
 			array = append(array, val)
 			types = append(types, typ)
@@ -282,10 +282,6 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 			if it.typ != itemKeyStart {
 				p.bug("Expected key start but instead found %q, around line %d",
 					it.val, p.approxLine)
-			}
-			if it.typ == itemCommentStart {
-				p.expect(itemText)
-				continue
 			}
 
 			// retrieve key
