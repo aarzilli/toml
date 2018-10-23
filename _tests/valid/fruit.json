@@ -1,0 +1,20 @@
+{
+	"fruit": {
+		"blah": [
+			{
+				"name": { "type": "string", "value": "apple" },
+				"physical": {
+					"color": {"type": "string", "value": "red" },
+					"shape": {"type": "string", "value": "round" }
+				}
+			},
+			{
+				"name": { "type": "string", "value": "banana" },
+				"physical": {
+					"color": {"type": "string", "value": "yellow" },
+					"shape": {"type": "string", "value": "bent" }
+				}
+			}
+		]
+	}
+}

@@ -11,6 +11,8 @@ Spec: https://github.com/toml-lang/toml
 Compatible with TOML version
 [v0.4.0](https://github.com/toml-lang/toml/blob/master/versions/en/toml-v0.4.0.md)
 
+Compatible with TOML version v0.5.0, except for dotted keys.
+
 Documentation: https://godoc.org/github.com/BurntSushi/toml
 
 Installation:
