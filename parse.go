@@ -261,7 +261,9 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 		var err error
 		for _, format := range []string{
 			"2006-01-02T15:04:05Z07:00",
+			"2006-01-02 15:04:05Z07:00",
 			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
 			"2006-01-02",
 		} {
 			t, err = time.ParseInLocation(format, it.val, time.Local)
@@ -274,6 +276,11 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 			p.panicf("Invalid TOML Datetime: %q.", it.val)
 		}
 		return t, p.typeOfPrimitive(it)
+	case itemTime:
+		if !timeOK(it.val) {
+			p.panicf("Invalid time value: %q", it.val)
+		}
+		return it.val, p.typeOfPrimitive(it)
 	case itemArray:
 		array := make([]interface{}, 0)
 		types := make([]tomlType, 0)
@@ -384,6 +391,40 @@ func leadingZeroOK(s string) bool {
 		return true
 	}
 	return s[0] != '0'
+}
+
+// Returns true if s is a valid time string.
+func timeOK(s string) bool {
+	fields := strings.Split(s, ":")
+	if len(fields) != 3 {
+		return false
+	}
+	isnum := func(s string, n int) bool {
+		if len(s) != n {
+			return false
+		}
+		for j := range s {
+			if !isDigit(rune(s[j])) {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < 2; i++ {
+		if !isnum(fields[i], 2) {
+			return false
+		}
+	}
+	if dot := strings.Index(fields[2], "."); dot >= 0 {
+		if !isnum(fields[2][:dot], 2) || !isnum(fields[2][dot+1:], 6) {
+			return false
+		}
+	} else {
+		if !isnum(fields[2], 2) {
+			return false
+		}
+	}
+	return true
 }
 
 // establishContext sets the current context of the parser,

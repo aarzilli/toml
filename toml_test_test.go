@@ -283,8 +283,7 @@ func (r result) cmpJson(expected, test interface{}) result {
 	panic("unreachable")
 }
 
-func (r result) cmpJsonMaps(
-	e map[string]interface{}, test interface{}) result {
+func (r result) cmpJsonMaps(e map[string]interface{}, test interface{}) result {
 
 	t, ok := test.(map[string]interface{})
 	if !ok {
@@ -447,16 +446,24 @@ func (r result) cmpFloats(e, t string) result {
 	return r
 }
 
-func (r result) cmpAsDatetimes(e, t string) result {
-	var err error
+func timeParse(e string) (time.Time, bool) {
+	for _, fmt := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02"} {
+		t, err := time.ParseInLocation(fmt, e, time.Local)
+		if err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
 
-	ef, err := time.Parse(time.RFC3339Nano, e)
-	if err != nil {
+func (r result) cmpAsDatetimes(e, t string) result {
+	ef, ok := timeParse(e)
+	if !ok {
 		return r.failedf("BUG in test case. Could not read '%s' as a datetime value for key '%s'.", e, r.key)
 	}
 
-	tf, err := time.Parse(time.RFC3339Nano, t)
-	if err != nil {
+	tf, ok := timeParse(t)
+	if !ok {
 		return r.failedf("Malformed parser output. Could not read '%s' as datetime value for key '%s'.", t, r.key)
 	}
 	if !ef.Equal(tf) {

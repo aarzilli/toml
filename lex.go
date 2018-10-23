@@ -23,6 +23,7 @@ const (
 	itemIntegerWithBase
 	itemFloat
 	itemDatetime
+	itemTime
 	itemArray // the start of an array
 	itemArrayEnd
 	itemTableStart
@@ -435,9 +436,9 @@ func lexValue(lx *lexer) stateFn {
 			lx.backup()
 		}
 	case r == '0':
-		return lexLeadZeroNumberOrDate
+		return lexLeadZeroNumberOrDateOrTime
 	case isDigit(r):
-		return lexNumberOrDate
+		return lexNumberOrDateOrTime
 	}
 	switch r {
 	case arrayStart:
@@ -748,11 +749,11 @@ func lexLongUnicodeEscape(lx *lexer) stateFn {
 	return lx.pop()
 }
 
-// lexNumberOrDate consumes either an integer, float or datetime.
-func lexNumberOrDate(lx *lexer) stateFn {
+// lexNumberOrDateOrTime consumes either an integer, float or datetime.
+func lexNumberOrDateOrTime(lx *lexer) stateFn {
 	r := lx.next()
 	if isDigit(r) {
-		return lexNumberOrDate
+		return lexNumberOrDateOrTime
 	}
 	switch r {
 	case '-':
@@ -761,6 +762,8 @@ func lexNumberOrDate(lx *lexer) stateFn {
 		return lexNumber
 	case '.', 'e', 'E':
 		return lexFloat
+	case ':':
+		return lexTime
 	}
 
 	lx.backup()
@@ -768,8 +771,8 @@ func lexNumberOrDate(lx *lexer) stateFn {
 	return lx.pop()
 }
 
-// lexLeadZeroNumberOrDate consumes either an integer, float or datetime starting with 0.
-func lexLeadZeroNumberOrDate(lx *lexer) stateFn {
+// lexLeadZeroNumberOrDateOrTime consumes either an integer, float or datetime starting with 0.
+func lexLeadZeroNumberOrDateOrTime(lx *lexer) stateFn {
 	r := lx.next()
 	switch r {
 	case 'x':
@@ -781,7 +784,7 @@ func lexLeadZeroNumberOrDate(lx *lexer) stateFn {
 	default:
 		// not specifying a base
 		lx.backup()
-		return lexNumberOrDate
+		return lexNumberOrDateOrTime
 	}
 }
 
@@ -830,10 +833,29 @@ func lexDatetime(lx *lexer) stateFn {
 	switch r {
 	case '-', 'T', ':', '.', 'Z', '+':
 		return lexDatetime
+	case ' ':
+		cur := lx.current()
+		if len(cur) > 0 {
+			cur = cur[:len(cur)-1]
+		}
+		if strings.Index(cur, "T") < 0 && strings.Index(cur, " ") < 0 {
+			return lexDatetime
+		}
 	}
 
 	lx.backup()
 	lx.emit(itemDatetime)
+	return lx.pop()
+}
+
+// lexTime consumes a time.
+func lexTime(lx *lexer) stateFn {
+	r := lx.next()
+	if isDigit(r) || r == ':' || r == '.' {
+		return lexTime
+	}
+	lx.backup()
+	lx.emit(itemTime)
 	return lx.pop()
 }
 
@@ -1001,6 +1023,8 @@ func (itype itemType) String() string {
 		return "Float"
 	case itemDatetime:
 		return "DateTime"
+	case itemTime:
+		return "Time"
 	case itemTableStart:
 		return "TableStart"
 	case itemTableEnd:

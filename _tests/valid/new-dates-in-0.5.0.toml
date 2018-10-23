@@ -1,0 +1,9 @@
+odt_without_t_delimiter = 1979-05-27 07:32:00Z
+# local date-times
+ldt1 = 1979-05-27T07:32:00
+ldt2 = 1979-05-27T00:32:00.999999
+# local dates
+ld1 = 1979-05-27
+# local times
+lt1 = 07:32:00
+lt2 = 00:32:00.999999
