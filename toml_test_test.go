@@ -145,7 +145,7 @@ func translateDecode(tomlData interface{}) interface{} {
 		// (If TOML ever supports tuples, we'll need this.)
 		return tag("array", typed)
 	case time.Time:
-		return tag("datetime", orig.Format("2006-01-02T15:04:05Z"))
+		return tag("datetime", orig.Format(time.RFC3339Nano))
 	case bool:
 		return tag("bool", fmt.Sprintf("%v", orig))
 	case int64:
@@ -336,14 +336,29 @@ func (r result) cmpJsonArrays(e, t interface{}) result {
 			"when 'type' indicates 'array', but it is a %T.", e)
 	}
 
-	ta, ok := t.([]interface{})
-	if !ok {
-		return r.failedf("Malformed parser output. 'value' should be a "+
-			"JSON array when 'type' indicates 'array', but it is a %T.", t)
+	var ta []interface{}
+
+	switch ta2 := t.(type) {
+	case []interface{}:
+		ta = ta2
+	case []map[string]interface{}:
+		ta = make([]interface{}, len(ta2))
+		for i := range ta2 {
+			ta[i] = ta2[i]
+		}
+	case map[string]interface{}:
+		// tagged array?
+		if typ, _ := ta2["type"].(string); typ != "array" {
+			return r.failedf("Malformed parser output. 'value' should be a JSON array when 'type' indicates 'array', but it is a %T.", t)
+		}
+
+		ta = ta2["value"].([]interface{})
+	default:
+		return r.failedf("Malformed parser output. 'value' should be a JSON array when 'type' indicates 'array', but it is a %T.", t)
 	}
+
 	if len(ea) != len(ta) {
-		return r.failedf("Array lengths differ for key '%s'. Expected a "+
-			"length of %d but got %d.", r.key, len(ea), len(ta))
+		return r.failedf("Array lengths differ for key '%s'. Expected a length of %d but got %d.", r.key, len(ea), len(ta))
 	}
 	for i := 0; i < len(ea); i++ {
 		if sub := r.cmpJson(ea[i], ta[i]); sub.failed() {
@@ -437,18 +452,15 @@ func (r result) cmpAsDatetimes(e, t string) result {
 
 	ef, err := time.Parse(time.RFC3339Nano, e)
 	if err != nil {
-		return r.failedf("BUG in test case. Could not read '%s' as a "+
-			"datetime value for key '%s'.", e, r.key)
+		return r.failedf("BUG in test case. Could not read '%s' as a datetime value for key '%s'.", e, r.key)
 	}
 
 	tf, err := time.Parse(time.RFC3339Nano, t)
 	if err != nil {
-		return r.failedf("Malformed parser output. Could not read '%s' "+
-			"as datetime value for key '%s'.", t, r.key)
+		return r.failedf("Malformed parser output. Could not read '%s' as datetime value for key '%s'.", t, r.key)
 	}
 	if !ef.Equal(tf) {
-		return r.failedf("Values for key '%s' don't match. Expected a "+
-			"value of '%v' but got '%v'.", r.key, ef, tf)
+		return r.failedf("Values for key '%s' don't match. Expected a value of '%v' but got '%v'.", r.key, ef, tf)
 	}
 	return r
 }
