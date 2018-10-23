@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,9 +67,6 @@ func TestDecoderValid(t *testing.T) {
 func TestDecoderInvalid(t *testing.T) {
 	for _, testCase := range readTestDirectory(t, "_tests/invalid", ".toml", "") {
 		t.Run(testCase.name, func(t *testing.T) {
-			if strings.Contains(testCase.name, "-leading-zero") {
-				t.Skip("these tests don't work") // XXX fix this
-			}
 			testDecoder(t, testCase, false)
 		})
 	}
@@ -117,7 +115,10 @@ func testDecoder(t *testing.T, testCase testCase, valid bool) {
 	}
 
 	r := result{valid: true}
-	r.cmpJson(tgtv, typedTmp)
+	r = r.cmpJson(tgtv, typedTmp)
+	if r.failed() {
+		t.Fatal(r.String())
+	}
 }
 
 func translateDecode(tomlData interface{}) interface{} {
@@ -238,6 +239,29 @@ func (r result) kjoin(key string) result {
 		r.key += "." + key
 	}
 	return r
+}
+
+func (r result) String() string {
+	buf := new(bytes.Buffer)
+	p := func(s string, v ...interface{}) { fmt.Fprintf(buf, s, v...) }
+
+	validStr := "invalid"
+	if r.valid {
+		validStr = "valid"
+	}
+	p("Test: %s (%s)\n\n", r.testName, validStr)
+
+	if r.err != nil {
+		p("Error running test: %s", r.err)
+		return buf.String()
+	}
+	if len(r.failure) > 0 {
+		p(r.failure)
+		return buf.String()
+	}
+
+	p("PASSED.")
+	return buf.String()
 }
 
 // compareJson consumes the recursive structure of both `expected` and `test`
@@ -397,6 +421,9 @@ func (r result) cmpFloats(e, t string) result {
 	if err != nil {
 		return r.failedf("Malformed parser output. Could not read '%s' "+
 			"as a float value for key '%s'.", t, r.key)
+	}
+	if math.IsNaN(ef) && math.IsNaN(tf) {
+		return r
 	}
 	if ef != tf {
 		return r.failedf("Values for key '%s' don't match. Expected a "+

@@ -1,0 +1,8 @@
+{
+	"zero": {"type": "integer", "value": "0"},
+	"floatzero": {"type": "float", "value": "0"},
+	"pluszero": {"type": "integer", "value": "0"},
+	"minuszero": {"type": "integer", "value": "0"},
+	"plusfloatzero": {"type": "float", "value": "0"},
+	"minusfloatzero": {"type": "float", "value": "0"}
+}

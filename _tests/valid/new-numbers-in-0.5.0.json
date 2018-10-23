@@ -1,0 +1,16 @@
+{
+	"hex1": {"type": "integer", "value": "3735928559"},
+	"hex2": {"type": "integer", "value": "3735928559"},
+	"hex3": {"type": "integer", "value": "3735928559"},
+	"hex0": {"type": "integer", "value": "0"},
+	"hex_leading_zero": {"type": "integer", "value": "1"},
+	"oct1": {"type": "integer", "value": "342391"},
+	"oct2": {"type": "integer", "value": "493"},
+	"bin1": {"type": "integer", "value": "214"},
+	"sf1": {"type": "float", "value": "inf"},
+	"sf2": {"type": "float", "value": "+inf"},
+	"sf3": {"type": "float", "value": "-inf"},
+	"sf4": {"type": "float", "value": "nan"},
+	"sf5": {"type": "float", "value": "nan"},
+	"sf6": {"type": "float", "value": "nan"}
+}

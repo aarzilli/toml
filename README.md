@@ -28,12 +28,6 @@ tomlv some-toml-file.toml
 
 [![Build Status](https://travis-ci.org/BurntSushi/toml.svg?branch=master)](https://travis-ci.org/BurntSushi/toml) [![GoDoc](https://godoc.org/github.com/BurntSushi/toml?status.svg)](https://godoc.org/github.com/BurntSushi/toml)
 
-### Testing
-
-This package passes all tests in
-[toml-test](https://github.com/BurntSushi/toml-test) for both the decoder
-and the encoder.
-
 ### Examples
 
 This package works similarly to how the Go standard library handles `XML`

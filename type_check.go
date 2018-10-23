@@ -48,7 +48,7 @@ var (
 // to occur: itemString, itemBool, itemInteger, itemFloat, itemDatetime.
 func (p *parser) typeOfPrimitive(lexItem item) tomlType {
 	switch lexItem.typ {
-	case itemInteger:
+	case itemInteger, itemIntegerWithBase:
 		return tomlInteger
 	case itemFloat:
 		return tomlFloat

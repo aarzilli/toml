@@ -20,6 +20,7 @@ const (
 	itemRawMultilineString
 	itemBool
 	itemInteger
+	itemIntegerWithBase
 	itemFloat
 	itemDatetime
 	itemArray // the start of an array
@@ -417,9 +418,26 @@ func lexValue(lx *lexer) stateFn {
 	switch {
 	case isWhitespace(r):
 		return lexSkip(lx, lexValue)
+	case r == 'i':
+		if lx.accept('n') {
+			if lx.accept('f') {
+				lx.emit(itemFloat)
+				return lx.pop()
+			}
+			lx.backup()
+		}
+	case r == 'n':
+		if lx.accept('a') {
+			if lx.accept('n') {
+				lx.emit(itemFloat)
+				return lx.pop()
+			}
+			lx.backup()
+		}
+	case r == '0':
+		return lexLeadZeroNumberOrDate
 	case isDigit(r):
-		lx.backup() // avoid an extra state and use the same as above
-		return lexNumberOrDateStart
+		return lexNumberOrDate
 	}
 	switch r {
 	case arrayStart:
@@ -730,23 +748,6 @@ func lexLongUnicodeEscape(lx *lexer) stateFn {
 	return lx.pop()
 }
 
-// lexNumberOrDateStart consumes either an integer, a float, or datetime.
-func lexNumberOrDateStart(lx *lexer) stateFn {
-	r := lx.next()
-	if isDigit(r) {
-		return lexNumberOrDate
-	}
-	switch r {
-	case '_':
-		return lexNumber
-	case 'e', 'E':
-		return lexFloat
-	case '.':
-		return lx.errorf("floats must start with a digit, not '.'")
-	}
-	return lx.errorf("expected a digit but got %q", r)
-}
-
 // lexNumberOrDate consumes either an integer, float or datetime.
 func lexNumberOrDate(lx *lexer) stateFn {
 	r := lx.next()
@@ -765,6 +766,58 @@ func lexNumberOrDate(lx *lexer) stateFn {
 	lx.backup()
 	lx.emit(itemInteger)
 	return lx.pop()
+}
+
+// lexLeadZeroNumberOrDate consumes either an integer, float or datetime starting with 0.
+func lexLeadZeroNumberOrDate(lx *lexer) stateFn {
+	r := lx.next()
+	switch r {
+	case 'x':
+		return lexHexNumber
+	case 'o':
+		return lexOctNumber
+	case 'b':
+		return lexBinNumber
+	default:
+		// not specifying a base
+		lx.backup()
+		return lexNumberOrDate
+	}
+}
+
+func lexHexNumber(lx *lexer) stateFn {
+	r := lx.next()
+	if isHexadecimal(r) || (r == '_') {
+		return lexHexNumber
+	}
+
+	lx.backup()
+	lx.emit(itemIntegerWithBase)
+	return lx.pop()
+}
+
+func lexOctNumber(lx *lexer) stateFn {
+	r := lx.next()
+	if ((r >= '0') && (r <= '7')) || (r == '_') {
+		return lexOctNumber
+	}
+
+	lx.backup()
+	lx.emit(itemIntegerWithBase)
+	return lx.pop()
+
+}
+
+func lexBinNumber(lx *lexer) stateFn {
+	r := lx.next()
+	if r == '0' || r == '1' || r == '_' {
+		return lexBinNumber
+	}
+
+	lx.backup()
+	lx.emit(itemIntegerWithBase)
+	return lx.pop()
+
 }
 
 // lexDatetime consumes a Datetime, to a first approximation.
@@ -791,8 +844,25 @@ func lexNumberStart(lx *lexer) stateFn {
 	// We MUST see a digit. Even floats have to start with a digit.
 	r := lx.next()
 	if !isDigit(r) {
-		if r == '.' {
+		switch r {
+		case '.':
 			return lx.errorf("floats must start with a digit, not '.'")
+		case 'i':
+			if lx.accept('n') {
+				if lx.accept('f') {
+					lx.emit(itemFloat)
+					return lx.pop()
+				}
+				lx.backup()
+			}
+		case 'n':
+			if lx.accept('a') {
+				if lx.accept('n') {
+					lx.emit(itemFloat)
+					return lx.pop()
+				}
+				lx.backup()
+			}
 		}
 		return lx.errorf("expected a digit but got %q", r)
 	}
@@ -925,7 +995,7 @@ func (itype itemType) String() string {
 		return "String"
 	case itemBool:
 		return "Bool"
-	case itemInteger:
+	case itemInteger, itemIntegerWithBase:
 		return "Integer"
 	case itemFloat:
 		return "Float"

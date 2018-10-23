@@ -84,7 +84,7 @@ func (p *parser) next() item {
 			return it
 		}
 	}
-		
+
 }
 
 func (p *parser) bug(format string, v ...interface{}) {
@@ -140,7 +140,6 @@ func (p *parser) topLevel(item item) {
 		p.setValue(p.currentKey, val)
 		p.setType(p.currentKey, typ)
 		p.ordered = append(p.ordered, p.context.add(p.currentKey))
-		p.currentKey = ""
 	default:
 		p.bug("Unexpected type at top level: %s", item.typ)
 	}
@@ -187,23 +186,32 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 			p.panicf("Invalid integer %q: underscores must be surrounded by digits",
 				it.val)
 		}
+		if !leadingZeroOK(it.val) {
+			p.panicf("Invalid integer %q: leading zeros are not allowed", it.val)
+		}
 		val := strings.Replace(it.val, "_", "", -1)
 		num, err := strconv.ParseInt(val, 10, 64)
-		if err != nil {
-			// Distinguish integer values. Normally, it'd be a bug if the lexer
-			// provides an invalid integer, but it's possible that the number is
-			// out of range of valid values (which the lexer cannot determine).
-			// So mark the former as a bug but the latter as a legitimate user
-			// error.
-			if e, ok := err.(*strconv.NumError); ok &&
-				e.Err == strconv.ErrRange {
-
-				p.panicf("Integer '%s' is out of the range of 64-bit "+
-					"signed integers.", it.val)
-			} else {
-				p.bug("Expected integer value, but got '%s'.", it.val)
-			}
+		p.manageStrconvErr(err, it)
+		return num, p.typeOfPrimitive(it)
+	case itemIntegerWithBase:
+		if len(it.val) < 3 {
+			p.panicf("Invalid integer %q: too short", it.val)
 		}
+		if !numUnderscoresOK(it.val[2:]) {
+			p.panicf("Invalid integer %q: underscores must be surrounded by digits", it.val)
+		}
+		val := strings.Replace(it.val[2:], "_", "", -1)
+		var num int64
+		var err error
+		switch it.val[1] {
+		case 'x':
+			num, err = strconv.ParseInt(val, 16, 64)
+		case 'o':
+			num, err = strconv.ParseInt(val, 8, 64)
+		case 'b':
+			num, err = strconv.ParseInt(val, 2, 64)
+		}
+		p.manageStrconvErr(err, it)
 		return num, p.typeOfPrimitive(it)
 	case itemFloat:
 		parts := strings.FieldsFunc(it.val, func(r rune) bool {
@@ -219,6 +227,9 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 					"surrounded by digits", it.val)
 			}
 		}
+		if len(parts) > 0 && !leadingZeroOK(parts[0]) {
+			p.panicf("Invalid float %q: leading zeros are not allowed", it.val)
+		}
 		if !numPeriodsOK(it.val) {
 			// As a special case, numbers like '123.' or '1.e2',
 			// which are valid as far as Go/strconv are concerned,
@@ -228,6 +239,10 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 				"by one or more digits", it.val)
 		}
 		val := strings.Replace(it.val, "_", "", -1)
+		switch val {
+		case "+nan", "-nan":
+			val = "nan"
+		}
 		num, err := strconv.ParseFloat(val, 64)
 		if err != nil {
 			if e, ok := err.(*strconv.NumError); ok &&
@@ -305,6 +320,24 @@ func (p *parser) value(it item) (interface{}, tomlType) {
 	panic("unreachable")
 }
 
+func (p *parser) manageStrconvErr(err error, it item) {
+	if err != nil {
+		// Distinguish integer values. Normally, it'd be a bug if the lexer
+		// provides an invalid integer, but it's possible that the number is
+		// out of range of valid values (which the lexer cannot determine).
+		// So mark the former as a bug but the latter as a legitimate user
+		// error.
+		if e, ok := err.(*strconv.NumError); ok &&
+			e.Err == strconv.ErrRange {
+
+			p.panicf("Integer '%s' is out of the range of 64-bit "+
+				"signed integers.", it.val)
+		} else {
+			p.bug("Expected integer value, but got '%s'.", it.val)
+		}
+	}
+}
+
 // numUnderscoresOK checks whether each underscore in s is surrounded by
 // characters that are not underscores.
 func numUnderscoresOK(s string) bool {
@@ -332,6 +365,25 @@ func numPeriodsOK(s string) bool {
 		period = r == '.'
 	}
 	return !period
+}
+
+// Returns true if s does not contain leading zeroes, which are disallowed by toml specification
+func leadingZeroOK(s string) bool {
+	if len(s) == 0 {
+		// how could this be?
+		return true
+	}
+	if (s[0] == '+') || (s[0] == '-') {
+		if len(s) == 1 {
+			return true
+		}
+		s = s[1:]
+	}
+	if len(s) < 2 {
+		// signed zero is acceptable
+		return true
+	}
+	return s[0] != '0'
 }
 
 // establishContext sets the current context of the parser,
