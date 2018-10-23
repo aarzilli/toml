@@ -8,6 +8,12 @@ multiline_empty_four = """\
    \
    """
 
+# new in 0.5.0, allow spaces after the \ operator
+multiline_empty_five = """\   
+   \ 
+   \
+   """
+
 equivalent_one = "The quick brown fox jumps over the lazy dog."
 equivalent_two = """
 The quick brown \

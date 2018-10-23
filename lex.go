@@ -690,8 +690,11 @@ func lexMultilineRawString(lx *lexer) stateFn {
 // preceding '\\' has already been consumed.
 func lexMultilineStringEscape(lx *lexer) stateFn {
 	// Handle the special case first:
-	if isNL(lx.next()) {
+	r := lx.next()
+	if isNL(r) {
 		return lexMultilineString
+	} else if isWhitespace(r) {
+		return lexMultilineStringEscape
 	}
 	lx.backup()
 	lx.push(lexMultilineString)
@@ -720,9 +723,7 @@ func lexStringEscape(lx *lexer) stateFn {
 	case 'U':
 		return lexLongUnicodeEscape
 	}
-	return lx.errorf("invalid escape character %q; only the following "+
-		"escape characters are allowed: "+
-		`\b, \t, \n, \f, \r, \", \\, \uXXXX, and \UXXXXXXXX`, r)
+	return lx.errorf("invalid escape character %q; only the following escape characters are allowed: "+`\b, \t, \n, \f, \r, \", \\, \uXXXX, and \UXXXXXXXX`, r)
 }
 
 func lexShortUnicodeEscape(lx *lexer) stateFn {

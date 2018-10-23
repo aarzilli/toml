@@ -2,6 +2,7 @@ package toml
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -592,8 +593,11 @@ func stripFirstNewline(s string) string {
 	return s[1:]
 }
 
+var escapedWhitespaceRegex = regexp.MustCompile(`\\[ \t]*\n`)
+
 func stripEscapedWhitespace(s string) string {
-	esc := strings.Split(s, "\\\n")
+	//TODO: this should really be part of the lexer, not hacked in here
+	esc := escapedWhitespaceRegex.Split(s, -1)
 	if len(esc) > 1 {
 		for i := 1; i < len(esc); i++ {
 			esc[i] = strings.TrimLeftFunc(esc[i], unicode.IsSpace)
