@@ -39,7 +39,7 @@ func Unmarshal(p []byte, v interface{}) error {
 // the overhead of reflection. They can be useful when you don't know the
 // exact type of TOML data until run time.
 type Primitive struct {
-	undecoded interface{}
+	undecoded *entry
 	context   Key
 }
 
@@ -117,10 +117,10 @@ func Decode(data string, v interface{}) (MetaData, error) {
 		return MetaData{}, err
 	}
 	md := MetaData{
-		p.mapping, p.types, p.ordered,
+		p.mapping, p.ordered,
 		make(map[string]bool, len(p.ordered)), nil,
 	}
-	return md, md.unify(p.mapping, indirect(rv))
+	return md, md.unify(&entry{kind: entryTable, table: &p.mapping}, indirect(rv))
 }
 
 // DecodeFile is just like Decode, except it will automatically read the
@@ -148,7 +148,7 @@ func DecodeReader(r io.Reader, v interface{}) (MetaData, error) {
 //
 // Any type mismatch produces an error. Finding a type that we don't know
 // how to handle produces an unsupported type error.
-func (md *MetaData) unify(data interface{}, rv reflect.Value) error {
+func (md *MetaData) unify(data *entry, rv reflect.Value) error {
 
 	// Special case. Look for a `Primitive` value.
 	if rv.Type() == reflect.TypeOf((*Primitive)(nil)).Elem() {
@@ -166,7 +166,7 @@ func (md *MetaData) unify(data interface{}, rv reflect.Value) error {
 	// Special case. Unmarshaler Interface support.
 	if rv.CanAddr() {
 		if v, ok := rv.Addr().Interface().(Unmarshaler); ok {
-			return v.UnmarshalTOML(data)
+			return v.UnmarshalTOML(data.toInterface())
 		}
 	}
 
@@ -231,26 +231,27 @@ func (md *MetaData) unify(data interface{}, rv reflect.Value) error {
 	return e("unsupported type %s", rv.Kind())
 }
 
-func (md *MetaData) unifyStruct(mapping interface{}, rv reflect.Value) error {
-	tmap, ok := mapping.(map[string]interface{})
-	if !ok {
+func (md *MetaData) unifyStruct(mapping *entry, rv reflect.Value) error {
+	if mapping.kind != entryTable {
 		if mapping == nil {
 			return nil
 		}
-		return e("type mismatch for %s: expected table but found %T",
-			rv.Type().String(), mapping)
+		return e("type mismatch for %s: expected table but found %T", rv.Type().String(), mapping.Kind())
 	}
 
-	for key, datum := range tmap {
+	tmap := mapping.table
+
+	for i := range tmap.entries {
+		entry := &tmap.entries[i]
 		var f *field
 		fields := cachedTypeFields(rv.Type())
 		for i := range fields {
 			ff := &fields[i]
-			if ff.name == key {
+			if ff.name == entry.name {
 				f = ff
 				break
 			}
-			if f == nil && strings.EqualFold(ff.name, key) {
+			if f == nil && strings.EqualFold(ff.name, entry.name) {
 				f = ff
 			}
 		}
@@ -260,9 +261,9 @@ func (md *MetaData) unifyStruct(mapping interface{}, rv reflect.Value) error {
 				subv = indirect(subv.Field(i))
 			}
 			if isUnifiable(subv) {
-				md.decoded[md.context.add(key).String()] = true
-				md.context = append(md.context, key)
-				if err := md.unify(datum, subv); err != nil {
+				md.decoded[md.context.add(entry.name).String()] = true
+				md.context = append(md.context, entry.name)
+				if err := md.unify(entry, subv); err != nil {
 					return err
 				}
 				md.context = md.context[0 : len(md.context)-1]
@@ -276,70 +277,67 @@ func (md *MetaData) unifyStruct(mapping interface{}, rv reflect.Value) error {
 	return nil
 }
 
-func (md *MetaData) unifyMap(mapping interface{}, rv reflect.Value) error {
-	tmap, ok := mapping.(map[string]interface{})
-	if !ok {
-		if tmap == nil {
-			return nil
-		}
+func (md *MetaData) unifyMap(mapping *entry, rv reflect.Value) error {
+	if mapping == nil {
+		return nil
+	}
+	if mapping.kind != entryTable {
 		return badtype("map", mapping)
 	}
+	tmap := mapping.table
 	if rv.IsNil() {
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
-	for k, v := range tmap {
-		md.decoded[md.context.add(k).String()] = true
-		md.context = append(md.context, k)
+	for i := range tmap.entries {
+		entry := &tmap.entries[i]
+		md.decoded[md.context.add(entry.name).String()] = true
+		md.context = append(md.context, entry.name)
 
 		rvkey := indirect(reflect.New(rv.Type().Key()))
 		rvval := reflect.Indirect(reflect.New(rv.Type().Elem()))
-		if err := md.unify(v, rvval); err != nil {
+		if err := md.unify(entry, rvval); err != nil {
 			return err
 		}
 		md.context = md.context[0 : len(md.context)-1]
 
-		rvkey.SetString(k)
+		rvkey.SetString(entry.name)
 		rv.SetMapIndex(rvkey, rvval)
 	}
 	return nil
 }
 
-func (md *MetaData) unifyArray(data interface{}, rv reflect.Value) error {
-	datav := reflect.ValueOf(data)
-	if datav.Kind() != reflect.Slice {
-		if !datav.IsValid() {
-			return nil
-		}
+func (md *MetaData) unifyArray(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if data.kind != entryArray {
 		return badtype("slice", data)
 	}
-	sliceLen := datav.Len()
-	if sliceLen != rv.Len() {
+	if len(data.array) != rv.Len() {
 		return e("expected array length %d; got TOML array of length %d",
-			rv.Len(), sliceLen)
+			rv.Len(), len(data.array))
 	}
-	return md.unifySliceArray(datav, rv)
+	return md.unifySliceArray(data.array, rv)
 }
 
-func (md *MetaData) unifySlice(data interface{}, rv reflect.Value) error {
-	datav := reflect.ValueOf(data)
-	if datav.Kind() != reflect.Slice {
-		if !datav.IsValid() {
-			return nil
-		}
+func (md *MetaData) unifySlice(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if data.kind != entryArray {
 		return badtype("slice", data)
 	}
-	n := datav.Len()
+	n := len(data.array)
 	if rv.IsNil() || rv.Cap() < n {
 		rv.Set(reflect.MakeSlice(rv.Type(), n, n))
 	}
 	rv.SetLen(n)
-	return md.unifySliceArray(datav, rv)
+	return md.unifySliceArray(data.array, rv)
 }
 
-func (md *MetaData) unifySliceArray(data, rv reflect.Value) error {
-	sliceLen := data.Len()
-	for i := 0; i < sliceLen; i++ {
-		v := data.Index(i).Interface()
+func (md *MetaData) unifySliceArray(data []entry, rv reflect.Value) error {
+	for i := range data {
+		v := &data[i]
 		sliceval := indirect(rv.Index(i))
 		if err := md.unify(v, sliceval); err != nil {
 			return err
@@ -348,24 +346,33 @@ func (md *MetaData) unifySliceArray(data, rv reflect.Value) error {
 	return nil
 }
 
-func (md *MetaData) unifyDatetime(data interface{}, rv reflect.Value) error {
-	if _, ok := data.(time.Time); ok {
-		rv.Set(reflect.ValueOf(data))
+func (md *MetaData) unifyDatetime(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if _, ok := data.scalar.(time.Time); ok {
+		rv.Set(reflect.ValueOf(data.scalar))
 		return nil
 	}
 	return badtype("time.Time", data)
 }
 
-func (md *MetaData) unifyString(data interface{}, rv reflect.Value) error {
-	if s, ok := data.(string); ok {
+func (md *MetaData) unifyString(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if s, ok := data.scalar.(string); ok {
 		rv.SetString(s)
 		return nil
 	}
 	return badtype("string", data)
 }
 
-func (md *MetaData) unifyFloat64(data interface{}, rv reflect.Value) error {
-	if num, ok := data.(float64); ok {
+func (md *MetaData) unifyFloat64(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if num, ok := data.scalar.(float64); ok {
 		switch rv.Kind() {
 		case reflect.Float32:
 			fallthrough
@@ -379,8 +386,11 @@ func (md *MetaData) unifyFloat64(data interface{}, rv reflect.Value) error {
 	return badtype("float", data)
 }
 
-func (md *MetaData) unifyInt(data interface{}, rv reflect.Value) error {
-	if num, ok := data.(int64); ok {
+func (md *MetaData) unifyInt(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if num, ok := data.scalar.(int64); ok {
 		if rv.Kind() >= reflect.Int && rv.Kind() <= reflect.Int64 {
 			switch rv.Kind() {
 			case reflect.Int, reflect.Int64:
@@ -426,22 +436,60 @@ func (md *MetaData) unifyInt(data interface{}, rv reflect.Value) error {
 	return badtype("integer", data)
 }
 
-func (md *MetaData) unifyBool(data interface{}, rv reflect.Value) error {
-	if b, ok := data.(bool); ok {
+func (md *MetaData) unifyBool(data *entry, rv reflect.Value) error {
+	if data == nil {
+		return nil
+	}
+	if b, ok := data.scalar.(bool); ok {
 		rv.SetBool(b)
 		return nil
 	}
 	return badtype("boolean", data)
 }
 
-func (md *MetaData) unifyAnything(data interface{}, rv reflect.Value) error {
-	rv.Set(reflect.ValueOf(data))
+func (md *MetaData) unifyAnything(data *entry, rv reflect.Value) error {
+	rv.Set(reflect.ValueOf(data.toInterface()))
 	return nil
 }
 
-func (md *MetaData) unifyText(data interface{}, v TextUnmarshaler) error {
+func (e *entry) toInterface() interface{} {
+	if e == nil {
+		return nil
+	}
+	switch e.kind {
+	case entryScalar:
+		return e.scalar
+	case entryArray:
+		if len(e.array) == 0 {
+			return []interface{}{}
+		}
+		if e.array[len(e.array)-1].kind == entryTable {
+			r := make([]map[string]interface{}, 0, len(e.array))
+			for i := range e.array {
+				r = append(r, e.array[i].toInterface().(map[string]interface{}))
+			}
+			return r
+		} else {
+			r := make([]interface{}, 0, len(e.array))
+			for i := range e.array {
+				r = append(r, e.array[i].toInterface())
+			}
+			return r
+		}
+	case entryTable:
+		r := make(map[string]interface{})
+		for i := range e.table.entries {
+			r[e.table.entries[i].name] = e.table.entries[i].toInterface()
+		}
+		return r
+	default:
+		return nil
+	}
+}
+
+func (md *MetaData) unifyText(data *entry, v TextUnmarshaler) error {
 	var s string
-	switch sdata := data.(type) {
+	switch sdata := data.scalar.(type) {
 	case TextMarshaler:
 		text, err := sdata.MarshalText()
 		if err != nil {
@@ -504,6 +552,6 @@ func isUnifiable(rv reflect.Value) bool {
 	return false
 }
 
-func badtype(expected string, data interface{}) error {
-	return e("cannot load TOML value of type %T into a Go %s", data, expected)
+func badtype(expected string, data *entry) error {
+	return e("cannot load TOML value of type %s into a Go %s", data.Kind(), expected)
 }

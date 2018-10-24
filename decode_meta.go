@@ -1,16 +1,97 @@
 package toml
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // MetaData allows access to meta information about TOML data that may not
 // be inferrable via reflection. In particular, whether a key has been defined
 // and the TOML type of a key.
 type MetaData struct {
-	mapping map[string]interface{}
-	types   map[string]tomlType
+	mapping table
 	keys    []Key
 	decoded map[string]bool
 	context Key // Used only during decoding.
+}
+
+type table struct {
+	entries []entry
+}
+
+type entry struct {
+	name   string
+	kind   entryKind
+	scalar interface{}
+	array  []entry
+	table  *table
+	typ    tomlType
+
+	implicit bool
+}
+
+type entryKind uint8
+
+const (
+	entryScalar entryKind = iota
+	entryArray
+	entryTable
+)
+
+func (e *entry) Kind() string {
+	switch e.kind {
+	case entryTable:
+		return "table"
+	case entryArray:
+		if len(e.array) == 0 {
+			return "array"
+		}
+		switch e.array[0].kind {
+		case entryTable:
+			return "array of tables"
+		case entryScalar:
+			return fmt.Sprintf("array of %T", e.array[0].scalar)
+		default:
+			return "array"
+		}
+	case entryScalar:
+		return fmt.Sprintf("%T", e.scalar)
+	default:
+		return "unknown"
+	}
+}
+
+func (t *table) getEntry(k string) *entry {
+	for i := range t.entries {
+		if t.entries[i].name == k {
+			return &t.entries[i]
+		}
+	}
+	return nil
+}
+
+func (t *table) newEntry(k string, kind entryKind) *entry {
+	t.entries = append(t.entries, entry{name: k, kind: kind})
+	return &t.entries[len(t.entries)-1]
+}
+
+func (md *MetaData) getEntry(key ...string) *entry {
+	if len(key) == 0 {
+		return nil
+	}
+
+	hashOrVal := &entry{kind: entryTable, table: &md.mapping}
+	for _, k := range key {
+		if hashOrVal.kind != entryTable {
+			return nil
+		}
+		hashOrVal = hashOrVal.table.getEntry(k)
+		if hashOrVal == nil {
+			return nil
+		}
+
+	}
+	return hashOrVal
 }
 
 // IsDefined returns true if the key given exists in the TOML data. The key
@@ -21,22 +102,8 @@ type MetaData struct {
 //
 // IsDefined will return false if an empty key given. Keys are case sensitive.
 func (md *MetaData) IsDefined(key ...string) bool {
-	if len(key) == 0 {
-		return false
-	}
-
-	var hash map[string]interface{}
-	var ok bool
-	var hashOrVal interface{} = md.mapping
-	for _, k := range key {
-		if hash, ok = hashOrVal.(map[string]interface{}); !ok {
-			return false
-		}
-		if hashOrVal, ok = hash[k]; !ok {
-			return false
-		}
-	}
-	return true
+	e := md.getEntry(key...)
+	return e != nil
 }
 
 // Type returns a string representation of the type of the key specified.
@@ -44,11 +111,11 @@ func (md *MetaData) IsDefined(key ...string) bool {
 // Type will return the empty string if given an empty key or a key that
 // does not exist. Keys are case sensitive.
 func (md *MetaData) Type(key ...string) string {
-	fullkey := strings.Join(key, ".")
-	if typ, ok := md.types[fullkey]; ok {
-		return typ.typeString()
+	e := md.getEntry(key...)
+	if e == nil {
+		return ""
 	}
-	return ""
+	return e.typ.typeString()
 }
 
 // Key is the type of any TOML key, including key groups. Use (MetaData).Keys

@@ -742,9 +742,6 @@ Locations = {NY = {Temp = "not cold", Rating = 4}, MI = {Temp = "freezing", Rati
 	if len(meta.keys) != 12 {
 		t.Errorf("after decode, got %d meta keys; want 12", len(meta.keys))
 	}
-	if len(meta.types) != 12 {
-		t.Errorf("after decode, got %d meta types; want 12", len(meta.types))
-	}
 }
 
 func TestDecodeInlineTableArray(t *testing.T) {
