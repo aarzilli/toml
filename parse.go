@@ -17,6 +17,9 @@ type parser struct {
 	// A list of keys in the order that they appear in the TOML data.
 	ordered []Key
 
+	// A list of comments
+	comments []*comment
+
 	// the full key for the current hash in scope
 	context Key
 
@@ -25,6 +28,10 @@ type parser struct {
 
 	// rough approximation of line number
 	approxLine int
+
+	prevNonCommentItem, lastNonCommentItem *item
+
+	lastEntry *entry
 }
 
 type parseError string
@@ -73,8 +80,21 @@ func (p *parser) next() item {
 		case itemError:
 			p.panicf("%s", it.val)
 		case itemComment:
-			// skip
+			cmt := &comment{it.val, it.line, true, false}
+			if p.lastNonCommentItem != nil && p.lastNonCommentItem.line == it.line && p.lastEntry != nil {
+				cmt.free = false
+				p.lastEntry.lineComment = cmt
+			}
+			if p.lastNonCommentItem != nil && p.lastNonCommentItem.line < it.line-1 {
+				cmt.spaced = true
+			}
+			p.comments = append(p.comments, cmt)
+			if e := p.mapping.getEntryRec(p.context...); e != nil && e.kind == entryTable {
+				e.table.comments = append(e.table.comments, cmt)
+			}
 		default:
+			p.prevNonCommentItem = p.lastNonCommentItem
+			p.lastNonCommentItem = &it
 			return it
 		}
 	}
@@ -100,6 +120,8 @@ func (p *parser) assertEqual(expected, got itemType) {
 func (p *parser) topLevel(item item) {
 	switch item.typ {
 	case itemTableStart:
+		leadComments := p.findLeadComments(item.line)
+
 		kg := p.next()
 		p.approxLine = kg.line
 
@@ -109,9 +131,11 @@ func (p *parser) topLevel(item item) {
 		}
 		p.assertEqual(itemTableEnd, kg.typ)
 
-		p.establishContext(key, false)
+		p.establishContext(key, false, leadComments)
 		p.ordered = append(p.ordered, key)
 	case itemArrayTableStart:
+		leadComments := p.findLeadComments(item.line)
+
 		kg := p.next()
 		p.approxLine = kg.line
 
@@ -121,14 +145,16 @@ func (p *parser) topLevel(item item) {
 		}
 		p.assertEqual(itemArrayTableEnd, kg.typ)
 
-		p.establishContext(key, true)
+		p.establishContext(key, true, leadComments)
 		p.ordered = append(p.ordered, key)
 	case itemKeyStart:
+		p.lastEntry = nil
 		kname := p.next()
 		p.approxLine = kname.line
 		p.currentKey = p.keyString(kname)
 
 		val := p.value(p.next())
+		val.line = item.line
 		p.addEntry(p.currentKey, val)
 		p.ordered = append(p.ordered, p.context.add(p.currentKey))
 	default:
@@ -160,7 +186,7 @@ func (p *parser) keyString(it item) string {
 // as an empty interface.
 func (p *parser) value(it item) *entry {
 	scalarEntry := func(scalar interface{}, typ tomlType) *entry {
-		return &entry{kind: entryScalar, scalar: scalar, typ: typ}
+		return &entry{kind: entryScalar, scalar: scalar, typ: typ, line: it.line, item: it}
 	}
 	switch it.typ {
 	case itemString:
@@ -281,18 +307,18 @@ func (p *parser) value(it item) *entry {
 		}
 		return scalarEntry(it.val, p.typeOfPrimitive(it))
 	case itemArray:
-		array := make([]entry, 0) //TODO: change this!
+		array := make([]*entry, 0)
 		types := make([]tomlType, 0)
 
 		for it = p.next(); it.typ != itemArrayEnd; it = p.next() {
 			val := p.value(it)
-			array = append(array, *val)
+			array = append(array, val)
 			types = append(types, val.typ)
 		}
-		return &entry{kind: entryArray, array: array, typ: p.typeOfArray(types)}
+		return &entry{kind: entryArray, array: array, typ: p.typeOfArray(types), inline: true, arrayEndLine: it.line}
 	case itemInlineTableStart:
 		var (
-			hash         = make([]entry, 0) //TODO: change this!
+			hash         = make([]*entry, 0)
 			outerContext = p.context
 			outerKey     = p.currentKey
 		)
@@ -315,11 +341,11 @@ func (p *parser) value(it item) *entry {
 			val := p.value(p.next())
 			val.name = kname
 			p.ordered = append(p.ordered, p.context.add(p.currentKey))
-			hash = append(hash, *val)
+			hash = append(hash, val)
 		}
 		p.context = outerContext
 		p.currentKey = outerKey
-		return &entry{kind: entryTable, table: &table{hash}, typ: tomlHash}
+		return &entry{kind: entryTable, table: &table{hash, nil, 0}, typ: tomlHash, inline: true, line: it.line}
 	}
 	p.bug("Unexpected value type: %s", it.typ)
 	panic("unreachable")
@@ -431,7 +457,7 @@ func timeOK(s string) bool {
 //
 // Establishing the context also makes sure that the key isn't a duplicate, and
 // will create implicit hashes automatically.
-func (p *parser) establishContext(key Key, array bool) {
+func (p *parser) establishContext(key Key, array bool, leadComments []*comment) {
 	// Always start at the top level and drill down for our context.
 	hashContext := &p.mapping
 	keyContext := make(Key, 0)
@@ -443,9 +469,14 @@ func (p *parser) establishContext(key Key, array bool) {
 
 		// No key? Make an implicit hash and move on.
 		if e == nil {
-			e = hashContext.newEntry(k, entryTable)
-			e.table = &table{}
-			e.implicit = true
+			e = &entry{
+				name:     k,
+				kind:     entryTable,
+				table:    &table{},
+				typ:      tomlHash,
+				implicit: true,
+			}
+			hashContext.entries = append(hashContext.entries, e)
 		}
 
 		// If the hash context is actually an array of tables, then set
@@ -455,7 +486,7 @@ func (p *parser) establishContext(key Key, array bool) {
 		// virtue of it not being the last element in a key).
 		switch e.kind {
 		case entryArray:
-			e = &e.array[len(e.array)-1]
+			e = e.array[len(e.array)-1]
 			if e.kind != entryTable {
 				p.panicf("Key '%s' is not an array of tables", keyContext)
 			}
@@ -474,20 +505,28 @@ func (p *parser) establishContext(key Key, array bool) {
 		k := key[len(key)-1]
 		e := hashContext.getEntry(k)
 		if e == nil {
-			e = hashContext.newEntry(k, entryArray)
-			e.typ = tomlArrayHash
-			e.array = make([]entry, 0, 5)
+			e = &entry{
+				name:  k,
+				kind:  entryArray,
+				typ:   tomlArrayHash,
+				array: make([]*entry, 0, 5),
+			}
+			hashContext.entries = append(hashContext.entries, e)
 		}
 
 		// Add a new table. But make sure the key hasn't already been used
 		// for something else.
 		if e.kind == entryArray && ((len(e.array) == 0) || (e.array[len(e.array)-1].kind == entryTable)) {
-			e.array = append(e.array, entry{kind: entryTable, table: &table{}})
+			ne := &entry{kind: entryTable, table: &table{}, typ: tomlHash, leadComments: leadComments}
+			e.array = append(e.array, ne)
+			p.lastEntry = ne
 		} else {
 			p.panicf("Key '%s' was already created and cannot be used as an array", keyContext)
 		}
 	} else {
-		p.addEntry(key[len(key)-1], &entry{kind: entryTable, table: &table{}, typ: tomlHash})
+		ne := &entry{kind: entryTable, table: &table{}, typ: tomlHash, leadComments: leadComments}
+		p.addEntry(key[len(key)-1], ne)
+		p.lastEntry = ne
 	}
 	p.context = append(p.context, key[len(key)-1])
 }
@@ -545,9 +584,9 @@ func (p *parser) addEntry(key string, entry *entry) {
 		// key, which is *always* wrong.
 		p.panicf("Key '%s' has already been defined", keyContext)
 	}
-	e = hash.newEntry(key, entry.kind)
-	*e = *entry
-	e.name = key
+	hash.entries = append(hash.entries, entry)
+	entry.name = key
+	p.lastEntry = entry
 }
 
 // current returns the full key name of the current context.
@@ -652,6 +691,30 @@ func (p *parser) asciiEscapeToUnicode(bs []byte) rune {
 		p.panicf("Escaped character '\\u%s' is not valid UTF-8.", s)
 	}
 	return rune(hex)
+}
+
+func (p *parser) findLeadComments(line int) []*comment {
+	curline := line - 1
+	var i int
+	for i = len(p.comments) - 1; i >= 0; i-- {
+		if p.comments[i].line != curline || !p.comments[i].free {
+			break
+		}
+		curline--
+	}
+	i++
+	if i >= len(p.comments) {
+		return nil
+	}
+	if p.prevNonCommentItem != nil && p.comments[i].line < p.prevNonCommentItem.line+2 {
+		return nil
+	}
+
+	for j := i; j < len(p.comments); j++ {
+		p.comments[j].free = false
+	}
+
+	return p.comments[i:]
 }
 
 func isStringType(ty itemType) bool {

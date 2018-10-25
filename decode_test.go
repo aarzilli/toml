@@ -976,6 +976,72 @@ func TestDecodeBoolArray(t *testing.T) {
 	}
 }
 
+func TestDecodeKeepComments(t *testing.T) {
+	var testSimple = `
+# start of file comment
+
+key1 = "value" # line comment for key1
+# freestanding comment
+key2 = "value2" # line comment for key2
+
+# lead comment for table1
+# second line of lead comment for table1
+[table1] # line comment for table1 header
+
+# freestanding comment 1 in table1
+key3 = "value3" # line comment for key3
+# freestanding comment 2 in table1
+key4 = "value4" # line comment for key4
+
+# freestanding comment 3 in table1
+`
+	var v interface{}
+	md, err := Decode(testSimple, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	findFreeComment(t, &md.mapping, " start of file comment")
+	findFreeComment(t, &md.mapping, " freestanding comment")
+
+	if countFreeComments(&md.mapping) != 2 {
+		t.Errorf("wrong number of comments in table %s\n", md.mapping.comments)
+	}
+
+	if e := md.getEntry("key1"); e.lineComment == nil || e.lineComment.comment != " line comment for key1" {
+		t.Errorf("could not find line comment of key1: %v", e)
+	}
+
+	if e := md.getEntry("key2"); e.lineComment == nil || e.lineComment.comment != " line comment for key2" {
+		t.Errorf("could not find line comment for key2: %v", e)
+	}
+
+	t1 := md.getEntry("table1")
+
+	if len(t1.leadComments) != 2 || t1.leadComments[0].comment != " lead comment for table1" || t1.leadComments[1].comment != " second line of lead comment for table1" {
+		t.Errorf("could not find lead comment for table1: %v", t1)
+	}
+}
+
+func findFreeComment(t *testing.T, tbl *table, cmt string) {
+	for _, c := range tbl.comments {
+		if c.comment == cmt {
+			return
+		}
+	}
+	t.Fatalf("could not find comment %q in %q", cmt, tbl.comments)
+}
+
+func countFreeComments(tbl *table) int {
+	n := 0
+	for _, c := range tbl.comments {
+		if c.free {
+			n++
+		}
+	}
+	return n
+}
+
 func ExampleMetaData_PrimitiveDecode() {
 	var md MetaData
 	var err error

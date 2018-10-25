@@ -242,7 +242,7 @@ func (md *MetaData) unifyStruct(mapping *entry, rv reflect.Value) error {
 	tmap := mapping.table
 
 	for i := range tmap.entries {
-		entry := &tmap.entries[i]
+		entry := tmap.entries[i]
 		var f *field
 		fields := cachedTypeFields(rv.Type())
 		for i := range fields {
@@ -288,8 +288,7 @@ func (md *MetaData) unifyMap(mapping *entry, rv reflect.Value) error {
 	if rv.IsNil() {
 		rv.Set(reflect.MakeMap(rv.Type()))
 	}
-	for i := range tmap.entries {
-		entry := &tmap.entries[i]
+	for _, entry := range tmap.entries {
 		md.decoded[md.context.add(entry.name).String()] = true
 		md.context = append(md.context, entry.name)
 
@@ -335,9 +334,8 @@ func (md *MetaData) unifySlice(data *entry, rv reflect.Value) error {
 	return md.unifySliceArray(data.array, rv)
 }
 
-func (md *MetaData) unifySliceArray(data []entry, rv reflect.Value) error {
-	for i := range data {
-		v := &data[i]
+func (md *MetaData) unifySliceArray(data []*entry, rv reflect.Value) error {
+	for i, v := range data {
 		sliceval := indirect(rv.Index(i))
 		if err := md.unify(v, sliceval); err != nil {
 			return err

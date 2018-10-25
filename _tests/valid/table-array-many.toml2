@@ -1,11 +1,11 @@
 [[people]]
-first_name = "Bruce"
-last_name = "Springsteen"
+  first_name = "Bruce"
+  last_name = "Springsteen"
 
 [[people]]
-first_name = "Eric"
-last_name = "Clapton"
+  first_name = "Eric"
+  last_name = "Clapton"
 
 [[people]]
-first_name = "Bob"
-last_name = "Seger"
+  first_name = "Bob"
+  last_name = "Seger"

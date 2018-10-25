@@ -1,5 +1,5 @@
-[a.b.c]
-answer = 42
-
 [a]
-better = 43
+  better = 43
+  [a.b]
+    [a.b.c]
+      answer = 42

@@ -1,7 +1,9 @@
 [[a]]
-    [[a.b]]
-        [a.b.c]
-            d = "val0"
-    [[a.b]]
-        [a.b.c]
-            d = "val1"
+
+  [[a.b]]
+    [a.b.c]
+      d = "val0"
+
+  [[a.b]]
+    [a.b.c]
+      d = "val1"

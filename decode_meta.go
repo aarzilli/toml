@@ -16,18 +16,28 @@ type MetaData struct {
 }
 
 type table struct {
-	entries []entry
+	entries  []*entry
+	comments []*comment
+	lastcmt  int
 }
 
 type entry struct {
 	name   string
 	kind   entryKind
 	scalar interface{}
-	array  []entry
+	array  []*entry
 	table  *table
 	typ    tomlType
 
 	implicit bool
+
+	inline bool
+
+	leadComments []*comment
+	lineComment  *comment
+
+	line, arrayEndLine int
+	item               item
 }
 
 type entryKind uint8
@@ -37,6 +47,17 @@ const (
 	entryArray
 	entryTable
 )
+
+type comment struct {
+	comment string
+	line    int
+	free    bool
+	spaced  bool
+}
+
+func (cmt *comment) String() string {
+	return fmt.Sprintf("%d:%v:%s", cmt.line, cmt.free, cmt.comment)
+}
 
 func (e *entry) Kind() string {
 	switch e.kind {
@@ -64,23 +85,18 @@ func (e *entry) Kind() string {
 func (t *table) getEntry(k string) *entry {
 	for i := range t.entries {
 		if t.entries[i].name == k {
-			return &t.entries[i]
+			return t.entries[i]
 		}
 	}
 	return nil
 }
 
-func (t *table) newEntry(k string, kind entryKind) *entry {
-	t.entries = append(t.entries, entry{name: k, kind: kind})
-	return &t.entries[len(t.entries)-1]
-}
-
-func (md *MetaData) getEntry(key ...string) *entry {
+func (t *table) getEntryRec(key ...string) *entry {
 	if len(key) == 0 {
-		return nil
+		return &entry{kind: entryTable, table: t}
 	}
 
-	hashOrVal := &entry{kind: entryTable, table: &md.mapping}
+	hashOrVal := &entry{kind: entryTable, table: t}
 	for _, k := range key {
 		if hashOrVal.kind != entryTable {
 			return nil
@@ -92,6 +108,14 @@ func (md *MetaData) getEntry(key ...string) *entry {
 
 	}
 	return hashOrVal
+}
+
+func (md *MetaData) getEntry(key ...string) *entry {
+	return md.mapping.getEntryRec(key...)
+}
+
+func (e *entry) direct() bool {
+	return (e.kind == entryScalar) || e.inline
 }
 
 // IsDefined returns true if the key given exists in the TOML data. The key
@@ -135,17 +159,28 @@ func (k Key) maybeQuotedAll() string {
 }
 
 func (k Key) maybeQuoted(i int) string {
+	return maybeQuotedString(k[i])
+}
+
+func maybeQuotedString(s string) string {
 	quote := false
-	for _, c := range k[i] {
+	onlyDoubleQuotes := true
+	for _, c := range s {
 		if !isBareKeyChar(c) {
+			if c != '"' {
+				onlyDoubleQuotes = false
+			}
 			quote = true
 			break
 		}
 	}
 	if quote {
-		return "\"" + strings.Replace(k[i], "\"", "\\\"", -1) + "\""
+		if onlyDoubleQuotes {
+			return "'" + s + "'"
+		}
+		return "\"" + quotedString(s) + "\""
 	}
-	return k[i]
+	return s
 }
 
 func (k Key) add(piece string) Key {

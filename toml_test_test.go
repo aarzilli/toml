@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,7 +51,12 @@ func readTestDirectory(t *testing.T, path string, inext, tgtext string) []testCa
 		}
 		if tgtext != "" {
 			tgtname := strings.Replace(fi.Name(), inext, tgtext, -1)
-			tc.tgt = slurp(t, filepath.Join(path, tgtname))
+			_, err := os.Stat(filepath.Join(path, tgtname))
+			if err != nil && tgtext == ".toml2" {
+				tc.tgt = tc.in
+			} else {
+				tc.tgt = slurp(t, filepath.Join(path, tgtname))
+			}
 		}
 		r = append(r, tc)
 	}
@@ -73,11 +80,19 @@ func TestDecoderInvalid(t *testing.T) {
 }
 
 func TestEncoderValid(t *testing.T) {
-	t.Skip("these tests don't work") // XXX fix this
-	for _, testCase := range readTestDirectory(t, "_tests/valid", ".json", ".toml2") {
+	testCases := readTestDirectory(t, "_tests/valid", ".toml", ".toml2")
+	for i, testCase := range testCases {
+		stop := false
 		t.Run(testCase.name, func(t *testing.T) {
-			testEncoder(t, testCase, true)
+			testEncoder(t, testCase)
+			if t.Failed() {
+				stop = true
+			}
 		})
+		if stop {
+			t.Logf("executed %d/%d", i, len(testCases))
+			break
+		}
 	}
 }
 
@@ -85,7 +100,7 @@ func TestEncoderInvalid(t *testing.T) {
 	t.Skip("these tests don't work") // XXX fix this
 	for _, testCase := range readTestDirectory(t, "_tests/invalid-encoder", ".json", "") {
 		t.Run(testCase.name, func(t *testing.T) {
-			testEncoder(t, testCase, false)
+			testEncoderJSON(t, testCase, false)
 		})
 	}
 }
@@ -166,7 +181,7 @@ func tag(typeName string, data interface{}) map[string]interface{} {
 	}
 }
 
-func testEncoder(t *testing.T, testCase testCase, valid bool) {
+func testEncoderJSON(t *testing.T, testCase testCase, valid bool) {
 	defer func() {
 		ierr := recover()
 		if ierr == nil {
@@ -185,6 +200,7 @@ func testEncoder(t *testing.T, testCase testCase, valid bool) {
 	if valid {
 		if err != nil {
 			t.Error(err)
+			return
 		}
 	} else {
 		if err == nil {
@@ -196,7 +212,36 @@ func testEncoder(t *testing.T, testCase testCase, valid bool) {
 	}
 
 	if out := buf.String(); out != testCase.tgt {
-		t.Fatalf("output mismatch\noutput:\t%q\ntarget\t%q", out, testCase.tgt)
+		t.Errorf("output mismatch\noutput:\t%q\ntarget\t%q", out, testCase.tgt)
+	}
+}
+
+func testEncoder(t *testing.T, testCase testCase) {
+	defer func() {
+		ierr := recover()
+		if ierr == nil {
+			return
+		}
+		t.Errorf("encoder error: %v", ierr)
+	}()
+
+	var tmp interface{}
+	md, err := Decode(testCase.in, &tmp)
+	if err != nil {
+		t.Errorf("error: %v", err)
+		return
+	}
+
+	var buf bytes.Buffer
+	err = NewEncoder(&buf).EncodeWithMetadata(&md, tmp)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if out := buf.String(); out != testCase.tgt {
+		diff := doDiff(out, testCase.tgt)
+		t.Errorf("output mismatch\n===== OUTPUT =====\n%s\n===== TARGET =====\n%s\n==== DIFF ====\n%s", out, testCase.tgt, diff)
+
 	}
 }
 
@@ -568,4 +613,43 @@ func untag(typed map[string]interface{}) interface{} {
 func in(key string, m map[string]interface{}) bool {
 	_, ok := m[key]
 	return ok
+}
+
+func writetmp(a string) string {
+	f1, err := ioutil.TempFile("", "toml_test_test_diff")
+	if err != nil {
+		panic(err)
+	}
+	name := f1.Name()
+	if _, err := f1.Write([]byte(a)); err != nil {
+		panic(err)
+	}
+	if err := f1.Close(); err != nil {
+		panic(err)
+	}
+	return name
+}
+
+func doDiff(a, b string) string {
+	name1 := writetmp(a)
+	defer os.Remove(name1)
+
+	name2 := writetmp(b)
+	defer os.Remove(name2)
+
+	cmd := exec.Command("/usr/bin/diff", name1, name2)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Sprintf("could not diff: %v", err)
+	}
+
+	var buf bytes.Buffer
+	io.Copy(&buf, out)
+	cmd.Wait()
+
+	return buf.String()
 }
