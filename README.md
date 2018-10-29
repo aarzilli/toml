@@ -1,17 +1,26 @@
 ## TOML parser and encoder for Go with reflection
 
-TOML stands for Tom's Obvious, Minimal Language. This Go package provides a
-reflection interface similar to Go's standard library `json` and `xml`
-packages. This package also supports the `encoding.TextUnmarshaler` and
+TOML stands for Tom's Obvious, Minimal Language. 
+
+This Go package is a fork of
+[github.com/BurntSushi/toml](https://github.com/BurntSushi/toml) and it
+provides a reflection interface similar to Go's standard library packages
+`json` and `xml`. 
+
+This package also supports the `encoding.TextUnmarshaler` and
 `encoding.TextMarshaler` interfaces so that you can define custom data
 representations. (There is an example of this below.)
+
+Unlike [github.com/BurntSushi/toml](https://github.com/BurntSushi/toml) this
+package is partially compatible with 0.5.0 and also tries to preserve
+the original formatting and comments when encoding, making it suitable for
+processing files that are intended to be modified both by humans and
+programmatically.
 
 Spec: https://github.com/toml-lang/toml
 
 Compatible with TOML version
 [v0.4.0](https://github.com/toml-lang/toml/blob/master/versions/en/toml-v0.4.0.md)
-
-Compatible with TOML version v0.5.0, except for dotted keys.
 
 Documentation: https://godoc.org/github.com/BurntSushi/toml
 

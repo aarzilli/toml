@@ -56,10 +56,6 @@ func NewEncoder(w io.Writer) *Encoder {
 	}
 }
 
-func (enc *Encoder) Encode(v interface{}) error {
-	return enc.EncodeWithMetadata(nil, v)
-}
-
 // Encode writes a TOML representation of the Go value to the underlying
 // io.Writer. If the value given cannot be encoded to a valid TOML document,
 // then an error is returned.
@@ -83,6 +79,13 @@ func (enc *Encoder) Encode(v interface{}) error {
 // non-struct types and nested slices containing maps or structs.
 // (e.g., [][]map[string]string is not allowed but []map[string]string is OK
 // and so is []map[string][]string.)
+func (enc *Encoder) Encode(v interface{}) error {
+	return enc.EncodeWithMetadata(nil, v)
+}
+
+// EncodeWithMetadata writes a TOML representation of v. If v was decoded
+// using Decode and md is the metadata returned by Decode it will try to
+// preserve some formatting and comments from the originally decoded file.
 func (enc *Encoder) EncodeWithMetadata(md *MetaData, v interface{}) error {
 	rv := eindirect(reflect.ValueOf(v))
 	if err := enc.safeEncode(Key([]string{}), rv, md); err != nil {
